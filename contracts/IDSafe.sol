@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract IDSafe {
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+
+contract IDSafeNFT is ERC721URIStorage {
     struct Identity {
         bool isRegistered;
-        bool isFullyApproved;  // Add a flag to mark when identity is fully approved
+        bool isFullyApproved;
         address[] approvers;
         uint approvals;
         bytes32 dataHash;  // Encrypted hash of the identity data
@@ -14,11 +17,12 @@ contract IDSafe {
     address[] public ngoAddresses;
     uint public approvalThreshold;
     address public admin;
+    uint public tokenCounter;
 
     event IdentityRegistered(address indexed user, bytes32 dataHash);
     event IdentityApproved(address indexed approver, address indexed user);
     event IdentityRevoked(address indexed user);
-    event IdentityFullyApproved(address indexed user);  // Event for full approval
+    event IdentityFullyApproved(address indexed user);
     event IdentityStored(address indexed user, bytes32 dataHash);
 
     modifier onlyAdmin() {
@@ -31,25 +35,26 @@ contract IDSafe {
         _;
     }
 
-    constructor(address[] memory _ngoAddresses, uint _approvalThreshold) {
+    constructor(address[] memory _ngoAddresses, uint _approvalThreshold) ERC721("IDSafeNFT", "IDSNFT") {
         require(_approvalThreshold > 0, "Approval threshold must be greater than 0");
         require(_ngoAddresses.length >= _approvalThreshold, "Not enough NGOs for the given threshold");
         admin = msg.sender;
         ngoAddresses = _ngoAddresses;
         approvalThreshold = _approvalThreshold;
+        tokenCounter = 0;
     }
 
     // Function to register identity (NGO can call this on behalf of a refugee)
     function registerIdentity(address user, bytes32 encryptedDataHash) public onlyNGO {
         require(!identities[user].isRegistered, "User is already registered");
-        
+
         identities[user].isRegistered = true;
         identities[user].dataHash = encryptedDataHash;
         emit IdentityRegistered(user, encryptedDataHash);
     }
 
     // Function to approve an identity
-    function approveIdentity(address user) public onlyNGO {
+    function approveIdentity(address user, string memory tokenURI) public onlyNGO {
         require(identities[user].isRegistered, "User is not registered");
         require(!hasApproved(user, msg.sender), "NGO has already approved this identity");
         require(!identities[user].isFullyApproved, "Identity is already fully approved");
@@ -63,9 +68,17 @@ contract IDSafe {
         if (identities[user].approvals >= approvalThreshold) {
             // Mark identity as fully approved
             identities[user].isFullyApproved = true;
-            // Emit an event for full approval
+            // Mint NFT to the user
+            mintIdentityNFT(user, tokenURI);
             emit IdentityFullyApproved(user);
         }
+    }
+
+    // Internal function to mint NFT
+    function mintIdentityNFT(address user, string memory tokenURI) internal {
+        _safeMint(user, tokenCounter);
+        _setTokenURI(tokenCounter, tokenURI);
+        tokenCounter++;
     }
 
     // Function to check if a specific NGO has already approved an identity
@@ -85,11 +98,6 @@ contract IDSafe {
         delete identities[user];  // Delete the identity from the mapping
 
         emit IdentityRevoked(user);
-    }
-
-    // Function to check if the user is registered
-    function isRegistered(address user) public view returns (bool) {
-        return identities[user].isRegistered;
     }
 
     // Function to store an encrypted data hash of the identity information (for privacy)
